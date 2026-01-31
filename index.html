@@ -1,1 +1,595 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <!-- 关键：设置视口，禁止用户缩放以保持应用质感 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>医患沟通沉浸式剧场：HIV场景模拟</title>
+    <style>
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0f172a, #1e1b4b, #312e81);
+            --accent-color: #818cf8;
+            --highlight-color: #38bdf8;
+            --warm-color: #fb7185;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --card-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: 1px solid rgba(255, 255, 255, 0.1);
+            --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden; /* 防止整体页面滚动，只允许内部滚动 */
+            display: flex;
+            flex-direction: column;
+        }
+
+        #canvas-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+
+        /* --- 头部适配 --- */
+        header {
+            position: relative;
+            z-index: 10;
+            padding: 15px 20px;
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(12px);
+            border-bottom: var(--glass-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        h1 { font-size: 1.1rem; font-weight: 500; letter-spacing: 0.5px; margin-bottom: 2px; }
+        .subtitle { font-size: 0.75rem; color: var(--text-secondary); }
+        
+        .mode-badge {
+            padding: 4px 10px;
+            background: rgba(129, 140, 248, 0.2);
+            color: var(--accent-color);
+            border-radius: 20px;
+            font-size: 0.7rem;
+            border: 1px solid rgba(129, 140, 248, 0.3);
+            white-space: nowrap;
+        }
+
+        /* --- 主舞台适配 --- */
+        main {
+            position: relative;
+            z-index: 5;
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .theater-stage {
+            display: flex;
+            gap: 20px;
+            width: 100%;
+            max-width: 1200px;
+            justify-content: center;
+            flex-direction: row; /* 桌面默认横向 */
+            align-items: stretch;
+        }
+
+        /* --- 卡片设计 --- */
+        .scene-card {
+            flex: 1;
+            background: var(--card-bg);
+            border: var(--glass-border);
+            border-radius: 16px;
+            padding: 25px;
+            cursor: pointer;
+            transition: transform 0.2s ease, background 0.2s;
+            position: relative;
+            overflow: hidden;
+            min-height: 300px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+
+        .scene-card:active { transform: scale(0.98); background: rgba(255, 255, 255, 0.1); }
+
+        .icon-wrapper {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+            background: rgba(255,255,255,0.05);
+            width: 70px; height: 70px;
+            border-radius: 50%;
+            display: flex; justify-content: center; align-items: center;
+        }
+
+        .scene-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: var(--text-primary); }
+        .scene-desc { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5; }
+
+        /* --- 模态框 (沉浸式剧场) --- */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 100;
+            opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+            display: flex; justify-content: center; align-items: center;
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-overlay.active { opacity: 1; pointer-events: all; }
+
+        .theater-container {
+            width: 90%; height: 85%; max-width: 1400px;
+            display: flex;
+            background: #1e1b4b;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
+            border: 1px solid rgba(255,255,255,0.15);
+            flex-direction: row; /* 桌面默认横向 */
+        }
+
+        /* 左侧：可视化演示区 */
+        .visual-panel {
+            flex: 1.2;
+            background: radial-gradient(circle at center, #2e2a5b, #0f172a);
+            position: relative;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border-right: 1px solid rgba(255,255,255,0.05);
+            min-height: 250px;
+        }
+
+        /* 右侧：剧本与策略区 */
+        .script-panel {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+            background: rgba(30, 27, 75, 0.95);
+            -webkit-overflow-scrolling: touch; /* iOS 惯性滚动 */
+        }
+
+        /* 关闭按钮优化 */
+        .close-btn {
+            position: absolute; top: 15px; right: 15px;
+            width: 40px; height: 40px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white; font-size: 1.5rem; 
+            display: flex; justify-content: center; align-items: center;
+            cursor: pointer; z-index: 20;
+        }
+
+        /* 内容样式 */
+        h2 { color: var(--highlight-color); margin-bottom: 15px; font-size: 1.2rem; font-weight: 400; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; }
+        
+        .dialogue-box {
+            background: rgba(255,255,255,0.03);
+            border-left: 3px solid var(--accent-color);
+            padding: 12px;
+            margin-bottom: 15px;
+            border-radius: 0 6px 6px 0;
+        }
+        
+        .doctor-line { color: var(--highlight-color); font-weight: bold; font-size: 0.9rem; margin-bottom: 4px; display: block; }
+        .patient-line { color: var(--warm-color); font-weight: bold; font-size: 0.9rem; margin-bottom: 4px; display: block; margin-top: 8px; }
+        .annotation { font-size: 0.8rem; color: var(--text-secondary); font-style: italic; margin-top: 8px; background: rgba(0,0,0,0.2); padding: 6px; border-radius: 4px; }
+        .key-point { display: inline-block; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: var(--highlight-color); margin-right: 5px; margin-bottom: 5px; }
+
+        #animation-canvas { width: 100%; height: 100%; position: relative; display: flex; justify-content: center; align-items: center; }
+
+        /* =========================================
+           核心适配：媒体查询 (Media Queries)
+           ========================================= */
+        
+        /* 平板和手机 (竖屏模式) */
+        @media (max-width: 900px) {
+            body { height: auto; min-height: 100vh; overflow-y: auto; } /* 允许body滚动 */
+            
+            /* 1. 主舞台改为纵向堆叠 */
+            .theater-stage {
+                flex-direction: column;
+                gap: 15px;
+                padding-bottom: 40px;
+            }
+
+            .scene-card {
+                min-height: auto;
+                padding: 20px;
+                flex-direction: row; /* 图标在左，文字在右 */
+                text-align: left;
+                align-items: flex-start;
+            }
+
+            .icon-wrapper {
+                margin-bottom: 0;
+                margin-right: 20px;
+                width: 50px; height: 50px;
+                font-size: 1.8rem;
+                flex-shrink: 0;
+            }
+
+            /* 2. 模态框改为上下布局 */
+            .theater-container {
+                flex-direction: column;
+                width: 95%;
+                height: 92%;
+            }
+
+            .visual-panel {
+                flex: 0 0 35%; /* 固定高度占比，约1/3 */
+                border-right: none;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+                padding: 10px;
+            }
+
+            .script-panel {
+                flex: 1; /* 剩余空间给文字 */
+                padding: 20px;
+            }
+
+            .close-btn {
+                top: 10px; right: 10px;
+                width: 32px; height: 32px;
+                font-size: 1.2rem;
+                background: rgba(0,0,0,0.6);
+            }
+            
+            #visual-caption { font-size: 0.8rem; margin-top: 5px; }
+        }
+
+        /* 小屏手机特别优化 */
+        @media (max-width: 480px) {
+            h1 { font-size: 1rem; }
+            .scene-title { font-size: 1rem; }
+            .scene-desc { font-size: 0.8rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+            .visual-panel { flex: 0 0 30%; }
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="canvas-bg"></canvas>
+
+    <header>
+        <div>
+            <h1>医患沟通剧场</h1>
+            <div class="subtitle">HIV 诊疗中的人文与伦理</div>
+        </div>
+        <div class="mode-badge">移动适配版</div>
+    </header>
+
+    <main>
+        <div class="theater-stage">
+            <div class="scene-card" onclick="openScene('diagnosis')">
+                <div class="icon-wrapper">📋</div>
+                <div>
+                    <div class="scene-title">第一幕：确诊告知</div>
+                    <div class="scene-desc">运用 SPIKES 模型进行坏消息告知，处理患者的心理休克期。</div>
+                </div>
+            </div>
+
+            <div class="scene-card" onclick="openScene('adherence')">
+                <div class="icon-wrapper">💊</div>
+                <div>
+                    <div class="scene-title">第二幕：依从性教育</div>
+                    <div class="scene-desc">解释 U=U 概念，运用动机访谈建立长期治疗联盟。</div>
+                </div>
+            </div>
+
+            <div class="scene-card" onclick="openScene('privacy')">
+                <div class="icon-wrapper">🔒</div>
+                <div>
+                    <div class="scene-title">第三幕：隐私与伦理</div>
+                    <div class="scene-desc">在伴侣告知与隐私保护之间寻找伦理平衡点。</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div class="modal-overlay" id="modal">
+        <div class="theater-container">
+            <button class="close-btn" onclick="closeScene()">×</button>
+            
+            <div class="visual-panel">
+                <div id="animation-canvas"></div>
+                <div id="visual-caption" style="margin-top: 10px; color: var(--text-secondary); text-align: center; font-size: 0.9rem;"></div>
+            </div>
+
+            <div class="script-panel" id="script-content">
+                <!-- 内容由 JS 动态注入 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const scenarios = {
+            diagnosis: {
+                title: "确诊告知：SPIKES 模型",
+                content: `
+                    <div class="dialogue-box">
+                        <span class="key-point">S - Setting (环境)</span>
+                        <p><strong>情境：</strong> 医生递上纸巾，保持平视。</p>
+                        <span class="doctor-line">医生：</span> “在看结果前，您对这次检测有什么预期吗？”
+                    </div>
+                    <div class="dialogue-box">
+                        <span class="key-point">K - Knowledge (告知)</span>
+                        <span class="doctor-line">医生：</span> “结果显示是阳性。这意味着您感染了HIV。”
+                        <span class="patient-line">患者：</span> (沉默，颤抖)
+                        <div class="annotation">策略：告知后必须留白 (Silence)，允许宣泄。</div>
+                    </div>
+                    <div class="dialogue-box">
+                        <span class="key-point">E - Empathy (共情)</span>
+                        <span class="doctor-line">医生：</span> “我知道这很难接受。您现在感觉怎么样？”
+                        <div class="annotation">策略：命名情绪，不要急于给建议。</div>
+                    </div>
+                `,
+                visualType: "emotion-curve",
+                caption: "患者心理休克期情绪波动 (库伯勒-罗丝模型)"
+            },
+            adherence: {
+                title: "依从性：U=U 与治疗联盟",
+                content: `
+                    <div class="dialogue-box">
+                        <span class="key-point">科学依据 U=U</span>
+                        <span class="doctor-line">医生：</span> “只要按时服药，病毒测不到就没有传染性。”
+                        <div class="annotation">策略：用数据注入希望 (Hope)。</div>
+                    </div>
+                    <div class="dialogue-box">
+                        <span class="key-point">动机访谈 (MI)</span>
+                        <span class="doctor-line">医生：</span> “您觉得每天服药最大的困难是什么？”
+                        <span class="patient-line">患者：</span> “怕被同事看到。”
+                        <div class="annotation">策略：共同寻找解决方案（如分装药盒）。</div>
+                    </div>
+                `,
+                visualType: "adherence-chart",
+                caption: "依从性与病毒载量/CD4关系"
+            },
+            privacy: {
+                title: "隐私与伦理：伴侣告知",
+                content: `
+                    <div class="dialogue-box">
+                        <span class="key-point">保密原则</span>
+                        <span class="patient-line">患者：</span> “千万别告诉我妻子。”
+                        <span class="doctor-line">医生：</span> “我有义务保护您的隐私。”
+                    </div>
+                    <div class="dialogue-box">
+                        <span class="key-point">伤害预防原则</span>
+                        <span class="doctor-line">医生：</span> “但如果不采取措施，您妻子面临极大风险。我们需要一起想办法。”
+                        <div class="annotation">伦理：首选劝导患者自行告知或协助告知。</div>
+                    </div>
+                `,
+                visualType: "privacy-flow",
+                caption: "信息流向与伦理决策路径"
+            }
+        };
+
+        const modal = document.getElementById('modal');
+        const scriptPanel = document.getElementById('script-content');
+        const visualPanel = document.getElementById('animation-canvas');
+        const caption = document.getElementById('visual-caption');
+        let currentAnimationId = null;
+        let activeSceneType = null;
+
+        function openScene(sceneKey) {
+            const data = scenarios[sceneKey];
+            activeSceneType = data.visualType;
+            
+            scriptPanel.innerHTML = `<h2>${data.title}</h2>${data.content}`;
+            caption.innerText = data.caption;
+            modal.classList.add('active');
+            
+            setTimeout(() => startAnimation(data.visualType), 100);
+        }
+
+        function closeScene() {
+            modal.classList.remove('active');
+            cancelAnimationFrame(currentAnimationId);
+            visualPanel.innerHTML = '';
+            activeSceneType = null;
+        }
+
+        function startAnimation(type) {
+            visualPanel.innerHTML = '';
+            if (type === 'emotion-curve') renderEmotionCurve();
+            else if (type === 'adherence-chart') renderAdherenceChart();
+            else if (type === 'privacy-flow') renderPrivacyFlow();
+        }
+
+        // --- 核心修正：医学情绪曲线绘制 (响应式+Retina适配) ---
+        function renderEmotionCurve() {
+            const rect = visualPanel.getBoundingClientRect();
+            let canvas = document.createElement('canvas');
+            visualPanel.appendChild(canvas);
+            
+            // 高清屏适配
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            canvas.style.width = `${rect.width}px`;
+            canvas.style.height = `${rect.height}px`;
+
+            const ctx = canvas.getContext('2d');
+            ctx.scale(dpr, dpr);
+
+            let time = 0;
+            const w = rect.width;
+            const h = rect.height;
+            const padding = 30;
+
+            function draw() {
+                if (!modal.classList.contains('active')) return;
+                ctx.clearRect(0, 0, w, h);
+
+                // 坐标轴
+                ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(padding, padding); ctx.lineTo(padding, h - padding);
+                ctx.moveTo(padding, h - padding); ctx.lineTo(w - padding, h - padding);
+                ctx.stroke();
+
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '10px sans-serif';
+                ctx.fillText("心理能量", padding + 5, padding + 10);
+                ctx.fillText("时间推移", w - 50, h - padding - 5);
+
+                // 曲线
+                ctx.beginPath();
+                ctx.strokeStyle = '#fb7185';
+                ctx.lineWidth = 3;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                const graphW = w - padding * 2;
+                const graphH = h - padding * 2;
+
+                for (let x = 0; x <= graphW; x += 2) {
+                    const progress = x / graphW;
+                    let moodValue = 0;
+
+                    // 库伯勒-罗丝模型数学模拟
+                    if (progress < 0.15) {
+                        moodValue = 0.9 + Math.sin(progress * 20) * 0.02; // 休克期
+                    } else if (progress < 0.35) {
+                        const localP = (progress - 0.15) / 0.20; 
+                        moodValue = 0.9 - (localP * 0.5) + Math.sin(x * 0.2 + time * 0.1) * 0.1; // 愤怒期
+                    } else if (progress < 0.70) {
+                        moodValue = 0.3 + Math.sin(x * 0.05) * 0.05; // 抑郁期(最低点)
+                    } else {
+                        const localP = (progress - 0.70) / 0.30;
+                        moodValue = 0.3 + (localP * 0.5); // 接受期
+                    }
+
+                    moodValue = Math.max(0.1, Math.min(0.95, moodValue));
+                    const y = (padding) + (1 - moodValue) * graphH;
+                    
+                    if (x === 0) ctx.moveTo(padding + x, y);
+                    else ctx.lineTo(padding + x, y);
+                }
+                ctx.stroke();
+
+                // 扫描线
+                const scanProgress = (time * 1.5) % graphW;
+                const scanX = padding + scanProgress;
+                
+                ctx.beginPath();
+                ctx.strokeStyle = 'rgba(56, 189, 248, 0.5)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 4]);
+                ctx.moveTo(scanX, padding);
+                ctx.lineTo(scanX, h - padding);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // 动态文字标注
+                ctx.fillStyle = '#fff';
+                ctx.font = '12px sans-serif';
+                let stageText = "";
+                const p = scanProgress / graphW;
+                if (p < 0.15) stageText = "休克期";
+                else if (p < 0.35) stageText = "否认/愤怒";
+                else if (p < 0.70) stageText = "抑郁/低谷 (共情点)";
+                else stageText = "接受/重构";
+                ctx.fillText(stageText, scanX + 5, padding + 20);
+
+                time += 1;
+                currentAnimationId = requestAnimationFrame(draw);
+            }
+            draw();
+        }
+
+        function renderAdherenceChart() {
+            const container = document.createElement('div');
+            container.style.cssText = "width:100%; height:100%; position:relative; display:flex; justify-content:space-around; align-items:flex-end; padding-bottom:20px;";
+            
+            const bar1 = document.createElement('div');
+            bar1.style.cssText = "width:25%; height:80%; background:#fb7185; border-radius:8px 8px 0 0; position:relative; transition:height 2s; min-width:30px;";
+            bar1.innerHTML = "<div style='position:absolute; bottom:-25px; width:100%; text-align:center; color:#aaa; font-size:0.7rem'>病毒</div>";
+            
+            const bar2 = document.createElement('div');
+            bar2.style.cssText = "width:25%; height:20%; background:#38bdf8; border-radius:8px 8px 0 0; position:relative; transition:height 2s; min-width:30px;";
+            bar2.innerHTML = "<div style='position:absolute; bottom:-25px; width:100%; text-align:center; color:#aaa; font-size:0.7rem'>CD4</div>";
+            
+            const pill = document.createElement('div');
+            pill.innerHTML = "💊";
+            pill.style.cssText = "position:absolute; top:10%; font-size:2rem; animation:dropPill 2s infinite;";
+            
+            const style = document.createElement('style');
+            style.innerHTML = `@keyframes dropPill { 0% { top: 10%; opacity: 0; } 50% { opacity: 1; } 100% { top: 80%; opacity: 0; } }`;
+            
+            container.appendChild(style);
+            container.appendChild(pill);
+            container.appendChild(bar1);
+            container.appendChild(bar2);
+            visualPanel.appendChild(container);
+
+            setTimeout(() => {
+                bar1.style.height = "10%";
+                bar2.style.height = "70%";
+                bar1.style.background = "#aaa";
+            }, 500);
+        }
+
+        function renderPrivacyFlow() {
+            visualPanel.innerHTML = `
+                <svg width="100%" height="100%" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid meet">
+                    <circle cx="50" cy="150" r="30" fill="#38bdf8" opacity="0.2" />
+                    <text x="50" y="155" text-anchor="middle" fill="white" font-size="12">医生</text>
+                    <circle cx="200" cy="150" r="30" fill="#fb7185" opacity="0.2" />
+                    <text x="200" y="155" text-anchor="middle" fill="white" font-size="12">患者</text>
+                    <circle cx="350" cy="50" r="25" fill="#94a3b8" opacity="0.1" stroke="#fff" stroke-dasharray="4" />
+                    <text x="350" y="55" text-anchor="middle" fill="#aaa" font-size="10">CDC</text>
+                    <circle cx="350" cy="250" r="25" fill="#94a3b8" opacity="0.1" stroke="#fff" stroke-dasharray="4" />
+                    <text x="350" y="255" text-anchor="middle" fill="#aaa" font-size="10">伴侣</text>
+                    <path d="M80 150 L170 150" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)" />
+                    <path d="M200 120 Q200 50 320 50" stroke="#38bdf8" stroke-width="2" fill="none" stroke-dasharray="5,5" />
+                    <path d="M200 180 Q200 250 320 250" stroke="#fb7185" stroke-width="2" fill="none" opacity="0.3" />
+                    <circle r="4" fill="#fff"><animateMotion dur="2s" repeatCount="indefinite" path="M80 150 L170 150" /></circle>
+                    <text x="260" y="220" fill="#fb7185" font-size="20">🔒</text>
+                    <text x="260" y="80" fill="#38bdf8" font-size="20">✅</text>
+                    <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="0" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#38bdf8" /></marker></defs>
+                </svg>
+            `;
+        }
+
+        window.addEventListener('resize', () => {
+            resizeBg();
+            if (activeSceneType && modal.classList.contains('active')) {
+                cancelAnimationFrame(currentAnimationId);
+                startAnimation(activeSceneType);
+            }
+        });
+
+        const bgCanvas = document.getElementById('canvas-bg');
+        const bgCtx = bgCanvas.getContext('2d');
+        let w, h, particles = [];
+        function resizeBg() { w = bgCanvas.width = window.innerWidth; h = bgCanvas.height = window.innerHeight; }
+        resizeBg();
+        class Particle {
+            constructor() { this.reset(); }
+            reset() { this.x = Math.random()*w; this.y = Math.random()*h; this.vx = (Math.random()-0.5)*0.2; this.vy = (Math.random()-0.5)*0.2; this.size = Math.random()*2; this.alpha = Math.random()*0.5; }
+            update() { this.x += this.vx; this.y += this.vy; if(this.x<0) this.x=w; if(this.x>w) this.x=0; if(this.y<0) this.y=h; if(this.y>h) this.y=0; }
+            draw() { bgCtx.fillStyle = `rgba(129, 140, 248, ${this.alpha})`; bgCtx.beginPath(); bgCtx.arc(this.x, this.y, this.size, 0, Math.PI*2); bgCtx.fill(); }
+        }
+        for(let i=0; i<50; i++) particles.push(new Particle());
+        function animateBg() { bgCtx.clearRect(0, 0, w, h); particles.forEach(p => { p.update(); p.draw(); }); requestAnimationFrame(animateBg); }
+        animateBg();
+
+        modal.addEventListener('click', (e) => { if (e.target === modal) closeScene(); });
+    </script>
+</body>
+</html>
 
